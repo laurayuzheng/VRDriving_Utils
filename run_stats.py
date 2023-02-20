@@ -185,7 +185,7 @@ class StatsManager:
             print(exp_id)
 
         self.questionnaire_df = pd.read_csv(os.path.join(self.datadir, "questionnaire.csv"), index_col=None, header=0)
-        self.questionnaire_df.columns = self.questionnaire_df.columns.str.replace(".1", "").str.strip()
+        self.questionnaire_df.columns = self.questionnaire_df.columns.str.replace(".1", "", regex=True).str.strip()
         self.questionnaire_df.rename({'What is your gender?': 'gender'}, axis=1, inplace=True)
 
         # Invert the scores for some questions for analysis (based on original MDSI paper)
@@ -269,7 +269,7 @@ class StatsManager:
                  "normalized_pos_x", "normalized_pos_y", 
                  "normalized_rot_x", "user_id"]] for df in dfs]
 
-        frames = min([len(df) for df in dfs])
+        frames = max([len(df.index) for df in dfs])
 
         fig = plt.figure()
         ax = plt.axes()
@@ -285,7 +285,7 @@ class StatsManager:
                 x = xs[j]
                 y = ys[j]
 
-                line, = ax.plot(x[:i], y[:i], color=c[j])  # update the data.
+                line, = ax.plot(x[:i], y[:i], color=c[j%len(c)])  # update the data.
 
                 if i < frames - 1 and i > 20:
                     ax.annotate("", xy=(x[i],y[i]), xytext=(x[i-2],y[i-2]), arrowprops=dict(arrowstyle="->", color=line.get_color()))
