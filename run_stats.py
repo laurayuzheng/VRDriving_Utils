@@ -181,7 +181,11 @@ class StatsManager:
             df["rotation_z"] = df["transform"].apply(lambda x: x[1][2])
 
             # Rotate trajectories so always driving forward 
-            rot_matrix = rotation_matrix(180 - first_rot_z)
+
+            if scenario_num == 2: 
+                rot_matrix = rotation_matrix(90 - first_rot_z)
+            else:
+                rot_matrix = rotation_matrix(180 - first_rot_z)
 
             for index, row in df.iterrows():
 
@@ -313,7 +317,7 @@ class StatsManager:
                  "normalized_pos_x", "normalized_pos_y", 
                  "normalized_rot_x", "user_id"]] for df in dfs]
 
-        frames = int(np.median([len(df.index) for df in dfs]))
+        frames = int(np.max([len(df.index) for df in dfs]))
 
         fig = plt.figure()
         ax = plt.axes()
@@ -338,6 +342,14 @@ class StatsManager:
                     ax.axhline(y=42, color='r', linestyle='dotted')
                     ax.annotate("pedestrian",
                             xy=(-10,42), 
+                            xytext=(0,2), textcoords='offset points',
+                            color='r',
+                            size=5
+                        )
+                if scenario == 2:
+                    ax.axhline(y=55, color='r', linestyle='dotted')
+                    ax.annotate("yellow traffic light",
+                            xy=(-10,55), 
                             xytext=(0,2), textcoords='offset points',
                             color='r',
                             size=5
@@ -396,10 +408,10 @@ if __name__ == "__main__":
 
     # stats.plot_personality_tsne(dimension=2)
     # stats.plot_personality_style()
-    stats.animate_trajectories(scenario=0)
-    stats.animate_trajectories(scenario=1)
+    # stats.animate_trajectories(scenario=0)
+    # stats.animate_trajectories(scenario=1)
     stats.animate_trajectories(scenario=2)
-    stats.animate_trajectories(scenario=3)
+    # stats.animate_trajectories(scenario=3)
 
     # for df in stats.sim_dfs:
     #     print(df.columns)
