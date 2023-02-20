@@ -13,8 +13,20 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.colors as mcolors
+from matplotlib.offsetbox import AnchoredText
+
+import matplotlib
+matplotlib.rcParams['ps.useafm'] = True
+matplotlib.rcParams['pdf.use14corefonts'] = True
 
 from sklearn.manifold import TSNE
+
+SCENARIO_DESCRIPTIONS = {
+    0: "Jaywalking pedestrian", 
+    1: "Static obstacles on highway",
+    2: "Yellow light on intersection approach",
+    3: "Control"
+}
 
 MDSI_COLUMNS = [
     'score_reckless', 
@@ -127,6 +139,9 @@ class StatsManager:
 
         for filename in sim_data_csv_list:
 
+            if "CARLAROUTE" in filename:
+                continue 
+
             exp_id = "_".join(filename.split("/")[-2].split("_")[:3])
             user_id = int(exp_id.split("_")[0])
             scenario_num = int(exp_id.split("_")[2])
@@ -155,7 +170,7 @@ class StatsManager:
 
             # first_rot_x = df["transform"][0][1][0]
             # first_rot_y = df["transform"][0][1][1]
-            first_rot_z = df["transform"][0][1][2]
+            first_rot_z = df["transform"].iloc[20][1][2]
 
             df["transform_x"] = df["transform"].apply(lambda x: x[0][0] - first_x)
             df["transform_y"] = df["transform"].apply(lambda x: x[0][1] - first_y)
@@ -250,6 +265,35 @@ class StatsManager:
 
         plt.show()
 
+
+    def plot_personality_style(self, color_code="gender", style1="score_risky", style2="score_anxious"):
+        '''
+        Plots two driving style values against each other, style1 being on x-axis and style2 being on y-axis.
+        '''
+
+        assert 'score_reckless' in self.questionnaire_df.columns, "personality scores not computed"
+
+
+
+        tsne_result_df = pd.DataFrame({style1: self.questionnaire_df[style1], style2: self.questionnaire_df[style2], 'color_code': self.questionnaire_df[color_code]})
+        fig, ax = plt.subplots(1)
+        sns.scatterplot(x=style1, y=style2, hue='color_code', data=tsne_result_df, ax=ax,s=120, legend=True)
+        plt.legend(loc='upper right')
+        
+        lim = (0, 7)
+        ax.set_xlim(lim)
+        ax.set_ylim(lim)
+        ax.set_aspect('equal')
+        plt.axhline(3.5, color='black')
+        plt.axvline(3.5, color='black')
+        ax.spines['bottom'].set_color('gray')
+        ax.spines['top'].set_color('gray') 
+        ax.spines['right'].set_color('gray')
+        ax.spines['left'].set_color('gray')
+        # ax.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
+
+        plt.savefig("./figs/%s_vs_%s.pdf" % (style1, style2), bbox_inches='tight')
+
     def get_scenario_data(self, scenario_num):
         scenario_data = [] 
 
@@ -269,7 +313,7 @@ class StatsManager:
                  "normalized_pos_x", "normalized_pos_y", 
                  "normalized_rot_x", "user_id"]] for df in dfs]
 
-        frames = max([len(df.index) for df in dfs])
+        frames = int(np.median([len(df.index) for df in dfs]))
 
         fig = plt.figure()
         ax = plt.axes()
@@ -280,20 +324,36 @@ class StatsManager:
 
         def animate(i):
             ax.cla()
+            orig_i = i 
 
             for j,df in enumerate(dfs):
                 x = xs[j]
                 y = ys[j]
 
+                i = min(orig_i, len(x)-1)
+
                 line, = ax.plot(x[:i], y[:i], color=c[j%len(c)])  # update the data.
+                
+                if scenario == 0:
+                    ax.axhline(y=42, color='r', linestyle='dotted')
+                    ax.annotate("pedestrian",
+                            xy=(-10,42), 
+                            xytext=(0,2), textcoords='offset points',
+                            color='r',
+                            size=5
+                        )
 
                 if i < frames - 1 and i > 20:
                     ax.annotate("", xy=(x[i],y[i]), xytext=(x[i-2],y[i-2]), arrowprops=dict(arrowstyle="->", color=line.get_color()))
-                    ax.annotate("user_%s" % (user_ids[j]),
-                        xy=(x[i],y[i]), 
-                        xytext=(1,0), textcoords='offset points',
-                        color=line.get_color()
-                    )
+                    # ax.annotate("user_%d" % (user_ids[j]),
+                    #     xy=(x[i],y[i]), 
+                    #     xytext=(1,0), textcoords='offset points',
+                    #     color=line.get_color()
+                    # )
+
+                text_box = AnchoredText("Frame: %d" % (i), frameon=True, loc=4, pad=0.5)
+                plt.setp(text_box.patch, facecolor='white', alpha=0.5)
+                plt.gca().add_artist(text_box)
 
             ax.set_xlim([np.min(x) - 10, np.max(x) + 10]) # fix the x axis
             ax.set_ylim([np.min(y) - 10, np.max(y) + 10]) # fix the y axis
@@ -303,24 +363,31 @@ class StatsManager:
             ax.set_ylabel('Y position', 
                fontweight ='bold')
             
+            ax.set_title("Scenario %d: %s" % (scenario, SCENARIO_DESCRIPTIONS[scenario]))
+            
             # ax.set_zlim3d(-10, 10) # fix the y axis
             return line,
 
         ani = animation.FuncAnimation(fig, animate, frames = frames, interval=1, blit=True)
 
-        # To save the animation, use e.g.
-        #
-        # ani.save("animation.gif")
-        #
-        # or
-        #
         writer = animation.FFMpegWriter(
             fps=60, metadata=dict(artist='laura:)'), bitrate=1800)
-        ani.save("scenario_%s.mp4" % (scenario), writer=writer)
+        ani.save("./vids/scenario_%s.mp4" % (scenario), writer=writer)
 
         # plt.show()
 
 if __name__ == "__main__":
+
+    # MDSI_COLUMNS = [
+    #     'score_reckless', 
+    #     'score_anxious',
+    #     'score_risky',
+    #     'score_angry',
+    #     'score_high_velocity',
+    #     'score_distress_reduction',
+    #     'score_patient',
+    #     'score_careful'
+    # ]
 
     DATADIR = "./data"
     EXCLUSIONS = [2]
@@ -328,9 +395,13 @@ if __name__ == "__main__":
     stats = StatsManager(DATADIR, EXCLUSIONS)
 
     # stats.plot_personality_tsne(dimension=2)
+    # stats.plot_personality_style()
     stats.animate_trajectories(scenario=0)
+    stats.animate_trajectories(scenario=1)
+    stats.animate_trajectories(scenario=2)
+    stats.animate_trajectories(scenario=3)
 
     # for df in stats.sim_dfs:
-    #     print(df["transform"][0])
+    #     print(df.columns)
 
     # print(stats.questionnaire_df["gender"])
