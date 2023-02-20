@@ -121,7 +121,7 @@ class StatsManager:
         Gets data from self.datadir and updates self.questionnaire_df and self.sim_df.
         '''
 
-        sim_data_csv_list = glob.glob(os.path.join(self.datadir, "simdata/*/*.csv"))
+        sim_data_csv_list = glob.glob(os.path.join(self.datadir, "sim_data/*/*.csv"))
 
         self.sim_dfs = [] 
 
