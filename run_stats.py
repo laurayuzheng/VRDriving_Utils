@@ -6,7 +6,7 @@ Feb 16, 2023
 
 import sys 
 import os, glob
-
+import itertools
 import numpy as np
 import pandas as pd 
 import seaborn as sns
@@ -18,6 +18,9 @@ from matplotlib.offsetbox import AnchoredText
 import matplotlib
 matplotlib.rcParams['ps.useafm'] = True
 matplotlib.rcParams['pdf.use14corefonts'] = True
+
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
 
 from sklearn.manifold import TSNE
 
@@ -128,6 +131,14 @@ class StatsManager:
         self._get_data()
         self._vectorize_personalities()
 
+    def print_sim_columns(self):
+        for i,name in enumerate(self.sim_dfs[0].columns.to_list()):
+            print(i, name)
+
+    def print_questionnaire_columns(self):
+        for i,name in enumerate(self.questionnaire_df.columns.to_list()):
+            print(i, name)
+
     def _get_data(self):
         '''
         Gets data from self.datadir and updates self.questionnaire_df and self.sim_df.
@@ -203,16 +214,63 @@ class StatsManager:
             self.sim_dfs.append(df)
             print(exp_id)
 
+            self._process_questionnaire_df()
+
+
+    def _process_questionnaire_df(self):
         self.questionnaire_df = pd.read_csv(os.path.join(self.datadir, "questionnaire.csv"), index_col=None, header=0)
         self.questionnaire_df.columns = self.questionnaire_df.columns.str.replace(".1", "", regex=True).str.strip()
         self.questionnaire_df.rename({'What is your gender?': 'gender'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'Full Name': 'name'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'What is your ethnicity?': 'ethnicity'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'Select your age group': 'age_group'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'Select your role': 'role'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'Have you experienced an autonomous vehicle before (e.g., Tesla\'s autopilot)?': 'autonomous_vehicle_experience'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'What is your ethnicity?': 'ethnicity'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'What kind of driver would you classify yourself as?': 'personality_self_classification'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'How do you get to school?': 'commute_method'}, axis=1, inplace=True)
+        self.questionnaire_df.rename({'Do you have a drivers license?': 'has_drivers_license'}, axis=1, inplace=True)
 
+        self.questionnaire_df.rename(columns={self.questionnaire_df.columns[10]: 'discomfort',
+                                              self.questionnaire_df.columns[11]: 'fatigue', 
+                                              self.questionnaire_df.columns[12]: 'headache',
+                                              self.questionnaire_df.columns[13]: 'eyestrain', 
+                                              self.questionnaire_df.columns[14]: 'difficulty_focusing', 
+                                              self.questionnaire_df.columns[15]: 'salivation',
+                                              self.questionnaire_df.columns[16]: 'sweating',
+                                              self.questionnaire_df.columns[17]: 'nausea',
+                                              self.questionnaire_df.columns[18]: 'difficulty_concentrating', 
+                                              self.questionnaire_df.columns[19]: 'fullness_of_head', 
+                                              self.questionnaire_df.columns[20]: 'blurred_vision', 
+                                              self.questionnaire_df.columns[21]: 'dizziness_eyes_open', 
+                                              self.questionnaire_df.columns[22]: 'dizziness_eyes_closed', 
+                                              self.questionnaire_df.columns[23]: 'vertigo', 
+                                              self.questionnaire_df.columns[24]: 'stomach_awareness', 
+                                              self.questionnaire_df.columns[25]: 'burping'
+                                            }, inplace=True)
+
+        
         # Invert the scores for some questions for analysis (based on original MDSI paper)
         self.questionnaire_df["feel I have control over driving"] = 6 - self.questionnaire_df["feel I have control over driving"]
         self.questionnaire_df["feel comfortable while driving"] = 6 - self.questionnaire_df["feel comfortable while driving"]
         self.questionnaire_df["when a traffic light turns green and the car in front of me doesn’t get going, I just wait for a while until it moves"] = 6 - self.questionnaire_df["when a traffic light turns green and the car in front of me doesn’t get going, I just wait for a while until it moves"]
         self.questionnaire_df["plan long journeys in advance"] = 6 - self.questionnaire_df["plan long journeys in advance"]
 
+        self.questionnaire_df.columns = [name if duplicated == False else name + "_2" for duplicated, name in zip(self.questionnaire_df.columns.duplicated(), self.questionnaire_df.columns)]
+
+        self.questionnaire_df = self.questionnaire_df.drop(['blow my horn or “flash” the car in front as a way of expressing frustrations_2', 
+                                                            "like to take risks while driving_2",
+                                                            "meditate while driving_2",  
+                                                            'Please select "6" for this question.',
+                                                            ], axis=1)
+
+        self.questionnaire_df.rename(columns={
+                                        "How easy was it for you to adjust to the simulated driving?": 'vr_ease_adjustment',
+                                        "From a scale from to0, do you feel as though the scenarios were realistic?": 'vr_realistic', 
+                                        'Please rate your sense of being in the virtual environment, on the following scale from to 7, where 7 represents your normal experience of being in a place. I had a sense of “being there” in the virtual environment:': 'vr_presence', 
+                                        "To what extent were there times during the experience when the virtual environment was the reality for you?": 'vr_immersion', 
+                                    }, inplace=True)
+        
     @staticmethod
     def _convert_transform_str_to_int(x):
         ''' Converts the string transform data type into tuple(array, array) type.
@@ -247,6 +305,14 @@ class StatsManager:
 
         # print(self.questionnaire_df[MDSI_COLUMNS])
 
+    def save_to_csv(self, savedir="csv_output/"):
+        os.makedirs(os.path.join(savedir, "simdata"), exist_ok=True)
+        df = self.questionnaire_df
+        df = df.drop(["name"], axis=1)
+        df.to_csv(os.path.join(savedir,"questionnaire_processed.csv"), encoding='utf-8', index=False)
+
+        for df in self.sim_dfs:
+            df.to_csv(os.path.join(savedir,"simdata","%s.csv"%(df["exp_id"][0])), encoding='utf-8', index=False)
 
     def plot_personality_tsne(self, color_code="gender", dimension=2):
         '''
@@ -406,11 +472,15 @@ if __name__ == "__main__":
 
     stats = StatsManager(DATADIR, EXCLUSIONS)
 
+    stats.save_to_csv()
+    # stats.print_sim_columns()
+    # stats.print_questionnaire_columns()
+
     # stats.plot_personality_tsne(dimension=2)
     # stats.plot_personality_style()
     # stats.animate_trajectories(scenario=0)
     # stats.animate_trajectories(scenario=1)
-    stats.animate_trajectories(scenario=2)
+    # stats.animate_trajectories(scenario=2)
     # stats.animate_trajectories(scenario=3)
 
     # for df in stats.sim_dfs:
