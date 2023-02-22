@@ -15,6 +15,8 @@ import matplotlib.animation as animation
 import matplotlib.colors as mcolors
 from matplotlib.offsetbox import AnchoredText
 
+from config import * 
+
 import matplotlib
 matplotlib.rcParams['ps.useafm'] = True
 matplotlib.rcParams['pdf.use14corefonts'] = True
@@ -139,6 +141,37 @@ class StatsManager:
         for i,name in enumerate(self.questionnaire_df.columns.to_list()):
             print(i, name)
 
+    def get_personality_data(self):
+        return self.questionnaire_df[MDSI_COLUMNS].to_numpy()
+    
+    def get_sim_data(self, scenario):
+        data = []
+        
+        for df in self.sim_dfs:
+            
+            # only want relevant scenario data
+            if df.iloc[0]["scenario_num"] != scenario:
+                continue 
+
+            user_data = []
+            length = 0
+            last_t = (0,0)
+            for i, row in df.iterrows():
+                t = (row["transform_x"], row["transform_y"])
+                user_data.append(t)
+                last_t = t
+                length = i
+            
+            # Zero padding the trajectory
+            for i in range(0, MAX_STEPS-length-1):
+                user_data.append(last_t)
+
+            assert len(user_data) == MAX_STEPS, "user data not the right length. Actual length: %d" % (len(user_data))
+            data.append(user_data)
+
+        return np.array(data)
+            
+
     def _get_data(self):
         '''
         Gets data from self.datadir and updates self.questionnaire_df and self.sim_df.
@@ -212,9 +245,11 @@ class StatsManager:
                 df.loc[index,"normalized_rot_y"] = xy_rot_vec[1]
 
             self.sim_dfs.append(df)
-            print(exp_id)
 
-            self._process_questionnaire_df()
+        # Sort based on user id (primary) and scenario number (secondary)
+        self.sim_dfs = sorted(self.sim_dfs, key=lambda x: x.iloc[0]["user_id"]+0.1*x.iloc[0]["scenario_num"])
+
+        self._process_questionnaire_df()
 
 
     def _process_questionnaire_df(self):
@@ -302,6 +337,9 @@ class StatsManager:
         df['score_distress_reduction'] = df[DISTRESS_REDUCTION_COLUMNS].mean(axis=1)
         df['score_patient'] = df[PATIENT_COLUMNS].mean(axis=1)
         df['score_careful'] = df[CAREFUL_COLUMNS].mean(axis=1)
+        
+        # normalize scores for each participant
+        df[MDSI_COLUMNS] = df[MDSI_COLUMNS].div(df[MDSI_COLUMNS].sum(axis=1), axis=0)
 
         # print(self.questionnaire_df[MDSI_COLUMNS])
 
@@ -366,18 +404,20 @@ class StatsManager:
 
     def get_scenario_data(self, scenario_num):
         scenario_data = [] 
+        indices = []
 
-        for data in self.sim_dfs: 
+        for i, data in enumerate(self.sim_dfs): 
             if data.iloc[0]["scenario_num"] == scenario_num:
                 scenario_data.append(data)
+                indices.append(i)
 
-        return scenario_data
+        return scenario_data, indices
 
     def animate_trajectories(self, scenario=0):
         
         c = list(mcolors.TABLEAU_COLORS)
 
-        dfs = self.get_scenario_data(scenario)
+        dfs, = self.get_scenario_data(scenario)
 
         dfs = [df[["frame_number", "transform_z", 
                  "normalized_pos_x", "normalized_pos_y", 
@@ -402,7 +442,9 @@ class StatsManager:
 
                 i = min(orig_i, len(x)-1)
 
-                line, = ax.plot(x[:i], y[:i], color=c[j%len(c)])  # update the data.
+                color = c[j%len(c)] if j != 0 else 'black'
+
+                line, = ax.plot(x[:i], y[:i], color=color)  # update the data.
                 
                 if scenario == 0:
                     ax.axhline(y=42, color='r', linestyle='dotted')
@@ -423,11 +465,13 @@ class StatsManager:
 
                 if i < frames - 1 and i > 20:
                     ax.annotate("", xy=(x[i],y[i]), xytext=(x[i-2],y[i-2]), arrowprops=dict(arrowstyle="->", color=line.get_color()))
-                    # ax.annotate("user_%d" % (user_ids[j]),
-                    #     xy=(x[i],y[i]), 
-                    #     xytext=(1,0), textcoords='offset points',
-                    #     color=line.get_color()
-                    # )
+                    
+                    if j == 0:
+                        ax.annotate("baseline",
+                            xy=(x[i],y[i]), 
+                            xytext=(1,0), textcoords='offset points',
+                            color=line.get_color()
+                        )
 
                 text_box = AnchoredText("Frame: %d" % (i), frameon=True, loc=4, pad=0.5)
                 plt.setp(text_box.patch, facecolor='white', alpha=0.5)

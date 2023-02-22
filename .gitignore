@@ -1,4 +1,5 @@
 
 data/
 csv_output/
+runs/
 .DS_Store
