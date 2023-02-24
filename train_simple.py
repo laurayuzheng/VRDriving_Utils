@@ -41,30 +41,36 @@ class VRDrivingDataset(Dataset):
 
 class SimpleNet(torch.nn.Module):
     ''' 
-    Simple linear regression model 
+    Simple 2 layer NN
     '''
     def __init__(self):
         super(SimpleNet, self).__init__()
+
         self.fc1 = Linear(MAX_STEPS*2, 100)
         self.fc2 = Linear(100, 8)
-        # self.fc3 = Linear(100, 8)
+
+        # torch.nn.init.kaiming_normal_(self.fc1.weight, nonlinearity='relu')
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
+        x = self.fc1(x)
+        x = F.relu(x)
         x = self.fc2(x)
-        # x = self.fc3(x)
         return x
+
 
 class Trainer:
 
     def __init__(self, scenario, 
-                 optimizer="adam", 
+                 optimizer="adam",
+                 exp_name="simple", 
                  criterion="mse", 
                  n_epochs=1000, 
                  lr=0.01, 
                  batch_size=1, 
-                 num_splits=2):        
+                 num_splits=2, 
+                 load=None):        
 
+        self.exp_name = exp_name
         self.scenario = scenario
         self.num_splits = num_splits
 
@@ -72,6 +78,10 @@ class Trainer:
                     n_epochs, 
                     lr, 
                     batch_size)
+        
+        if load: 
+            self.net.load_state_dict(torch.load(os.path.join("./models/%s/model.pt" % (load))))
+            print("Loaded ./models/%s/model.pt" % (load))
 
     def init_model(self, 
                 criterion, 
@@ -91,16 +101,19 @@ class Trainer:
         self.criterion = MSELoss() if criterion=="mse" else L1Loss()
         self.n_epochs = n_epochs
         self.batch_size = batch_size
-        self.writer = SummaryWriter("runs/simple_model_scenario_%d" % (self.scenario))
+        self.writer = SummaryWriter("runs/%s_scenario_%d" % (self.exp_name, self.scenario))
+
     
     def train_epoch(self, model, device, train_loader, criterion, optimizer):
+        model.train()
+
         epoch_loss = 0
 
         for i, data in enumerate(train_loader, 0):
             X, y = data 
             self.optimizer.zero_grad()
 
-            X = Tensor(X).float().flatten()
+            X = Tensor(X).float().view(self.batch_size, -1)
             y = Tensor(y).float()
 
             y_pred = model(X)
@@ -123,7 +136,7 @@ class Trainer:
                 X, y = data 
                 self.optimizer.zero_grad()
 
-                X = Tensor(X).float().flatten()
+                X = Tensor(X).float().view(self.batch_size, -1)
                 y = Tensor(y).float()
 
                 y_pred = model(X)
@@ -134,7 +147,7 @@ class Trainer:
 
 
         return epoch_loss 
-
+    
     def fit(self):
 
         history = {'train_loss': [], 'test_loss': []}
@@ -172,9 +185,71 @@ class Trainer:
         print("Average Training Loss: {:.4f} \t Average Test Loss: {:.4f} ".format(avg_train_loss,avg_test_loss))  
         print("Finished training. ")
 
+    def save(self):
+        os.makedirs("./models/%s" % (self.exp_name), exist_ok=True)
+        torch.save(self.net.state_dict(), "./models/%s/%s" % (self.exp_name, "model.pt"))
+
+    def get_grad_normalized(self):
+
+        self.net.eval() 
+        
+        dataloader = DataLoader(self.dataset, batch_size=self.batch_size)
+
+        grads = [] 
+
+        for i, data in enumerate(dataloader, 0):
+            X, y = data 
+
+            # X shape: (b=1, 2, 1500) --> (1, 3000)
+            X = X.float().view(self.batch_size, -1)
+
+            # y shape: (b=1, 8) 
+            y = y.float()
+
+            X.requires_grad = True 
+            y.requires_grad = True 
+
+            self.optimizer.zero_grad()
+
+            y_pred = self.net(X)
+            loss = self.criterion(y_pred, y)
+
+            loss.backward()
+            
+            grad = X.grad.data.view(2, -1).mean(axis=0)
+
+            # this nonzero count is always 0
+            # print(np.count_nonzero(np.array(grad)))
+            # print(np.array(grad))
+            grad = np.array(grad)
+            grad -= np.amin(grad)
+            grad = grad**2
+            grad /= (np.amax(grad) - np.amin(grad))
+            grad[grad<0.6] = 0.1
+            grads.append(grad)
+        
+        grads = np.array(grads)
+
+        # # now grads is weighted from 0 to 1, we can use this for visualizations.
+        return grads
+
+
+
+
 
 if __name__ == "__main__":
     
+    stats = StatsManager(DATADIR, EXCLUSIONS)
+    # stats.save_to_csv()
+
+    learning_rates = [0.001, 0.0001, 0.0001, 0.00001]
+
     for scenario in range(4):
-        trainer = Trainer(scenario=scenario, num_splits=8, n_epochs=500) 
-        trainer.fit()
+        exp = "simple_grad_%d" % (scenario)
+        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=100, lr=learning_rates[scenario], load=exp) 
+        # trainer.fit()
+        # trainer.save() 
+
+        grads = trainer.get_grad_normalized()
+
+        stats.trajectory_heatmap(grads, scenario=scenario)

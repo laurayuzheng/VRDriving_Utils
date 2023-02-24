@@ -14,12 +14,14 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.colors as mcolors
 from matplotlib.offsetbox import AnchoredText
+from matplotlib.colors import LinearSegmentedColormap
 
 from config import * 
 
 import matplotlib
 matplotlib.rcParams['ps.useafm'] = True
 matplotlib.rcParams['pdf.use14corefonts'] = True
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -169,7 +171,11 @@ class StatsManager:
             assert len(user_data) == MAX_STEPS, "user data not the right length. Actual length: %d" % (len(user_data))
             data.append(user_data)
 
-        return np.array(data)
+        data = np.array(data)
+        data -= np.amin(data)
+        data /= (np.amax(data) - np.amin(data))
+
+        return data
             
 
     def _get_data(self):
@@ -413,11 +419,81 @@ class StatsManager:
 
         return scenario_data, indices
 
+    def trajectory_heatmap(self, alpha_weights, scenario=0):
+        c = list(mcolors.TABLEAU_COLORS)
+
+        dfs, _ = self.get_scenario_data(scenario)
+        quantile = self.questionnaire_df.score_risky.quantile(0.75)
+        users = self.questionnaire_df.index[self.questionnaire_df['score_risky'] >= quantile].tolist()
+
+        dfs = [df[["frame_number", "transform_z", 
+                 "normalized_pos_x", "normalized_pos_y", 
+                 "normalized_rot_x", "user_id"]] for df in dfs]
+
+        frames = int(np.max([len(df.index) for df in dfs]))
+
+        fig = plt.figure()
+        ax = plt.axes()
+
+        xs = [df["normalized_pos_x"] for df in dfs]
+        ys = [df["normalized_pos_y"] for df in dfs]
+        # user_ids = [df.iloc[0]["user_id"] for df in dfs]
+        # max_risk = self.questionnaire_df['score_risky'].max()
+        # user_color_alphas = [df.iloc[0]["user_id"] for df in dfs]
+        
+        for j,df in enumerate(dfs):
+            
+            # only graph risky high scorers
+            # if j not in users:
+            #     continue 
+
+            x = xs[j]
+            y = ys[j]
+
+
+            colors = [(0, 0, 0), (1, 0, 0)] # first color is black, last is red
+            cm = LinearSegmentedColormap.from_list(
+                    "Custom", colors, N=5)
+            # mat = np.indices((10,10))[1]
+            alphas = alpha_weights[j][:len(x)]
+
+            ax.scatter(x, y, color=cm(alphas), s=6, alpha=alphas)  # update the data.
+            
+            if scenario == 0:
+                ax.axhline(y=42, color='blue', linestyle='dotted')
+                ax.annotate("pedestrian",
+                        xy=(-10,42), 
+                        xytext=(0,2), textcoords='offset points',
+                        color='blue',
+                        size=5
+                    )
+            if scenario == 2:
+                ax.axhline(y=55, color='blue', linestyle='dotted')
+                ax.annotate("yellow traffic light",
+                        xy=(-10,55), 
+                        xytext=(0,2), textcoords='offset points',
+                        color='blue',
+                        size=5
+                    )
+                
+        ax.set_xlim([np.min(x) - 10, np.max(x) + 10]) # fix the x axis
+        ax.set_ylim([np.min(y) - 10, np.max(y) + 10]) # fix the y axis
+
+        ax.set_xlabel('X position', 
+            fontweight ='bold')
+        ax.set_ylabel('Y position', 
+            fontweight ='bold')
+
+        ax.set_title("Scenario %d: %s" % (scenario, SCENARIO_DESCRIPTIONS[scenario]))
+
+        plt.savefig("figs/trajectory_heatmap_scenario%d.pdf" % (scenario))
+        plt.close()
+
     def animate_trajectories(self, scenario=0):
         
         c = list(mcolors.TABLEAU_COLORS)
 
-        dfs, = self.get_scenario_data(scenario)
+        dfs, _ = self.get_scenario_data(scenario)
 
         dfs = [df[["frame_number", "transform_z", 
                  "normalized_pos_x", "normalized_pos_y", 
@@ -431,7 +507,9 @@ class StatsManager:
         xs = [df["normalized_pos_x"] for df in dfs]
         ys = [df["normalized_pos_y"] for df in dfs]
         user_ids = [df.iloc[0]["user_id"] for df in dfs]
-
+        max_risk = self.questionnaire_df['score_risky'].max()
+        user_color_alphas = [df.iloc[0]["user_id"] for df in dfs]
+        
         def animate(i):
             ax.cla()
             orig_i = i 
@@ -439,12 +517,14 @@ class StatsManager:
             for j,df in enumerate(dfs):
                 x = xs[j]
                 y = ys[j]
+                
+                # alphas = alpha_weights[j]
 
                 i = min(orig_i, len(x)-1)
 
                 color = c[j%len(c)] if j != 0 else 'black'
 
-                line, = ax.plot(x[:i], y[:i], color=color)  # update the data.
+                line, = ax.plot(x[:i], y[:i], color=color, s=11)  # update the data.
                 
                 if scenario == 0:
                     ax.axhline(y=42, color='r', linestyle='dotted')
