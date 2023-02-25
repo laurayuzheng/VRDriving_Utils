@@ -52,7 +52,7 @@ DISSOCIATIVE_COLUMNS = [
     "forget that my lights are on full beam until flashed by another motorist",
     "nearly hit something due to misjudging my gap in a parking lot", 
     "plan my route badly, so that I hit traffic that I could have avoided", 
-    "attempt to drive away from traffic lights in third gear (or on the neutral mode in automatic cars)",
+    # "attempt to drive away from traffic lights in third gear (or on the neutral mode in automatic cars)",
     "lost in thoughts or distracted, I fail to notice someone at the pedestrian crossings",
     "I daydream to pass the time while driving"
 ]
@@ -131,6 +131,7 @@ class StatsManager:
 
         self.questionnaire_df = None 
         self.sim_dfs = None 
+        self.baseline_sim_dfs = None 
 
         self._get_data()
         self._vectorize_personalities()
@@ -144,22 +145,33 @@ class StatsManager:
             print(i, name)
 
     def get_personality_data(self):
-        return self.questionnaire_df[MDSI_COLUMNS].to_numpy()
+        return self.questionnaire_df[MDSI_COLUMNS].drop(index=EXCLUSIONS).to_numpy()
     
-    def get_sim_data(self, scenario):
+    def get_sim_data(self, scenario, user=None):
+
         data = []
         
-        for df in self.sim_dfs:
+        stuff_to_look_through = self.baseline_sim_dfs if user == -1 else self.sim_dfs
+
+        for df in stuff_to_look_through:
             
             # only want relevant scenario data
             if df.iloc[0]["scenario_num"] != scenario:
                 continue 
 
+            if user is not None and (df.iloc[0]["user_id"] != user or df.iloc[0]["user_id"] in EXCLUSIONS):
+                continue 
+
+            # if not looking for specific user, exclude the baseline
+            # if user is None and df.iloc[0]["user_id"] == 0:
+            #     continue 
+
             user_data = []
             length = 0
             last_t = (0,0)
             for i, row in df.iterrows():
-                t = (row["transform_x"], row["transform_y"])
+                t = (row["normalized_pos_x"], row["normalized_pos_x"])
+                # t = (row["transform_x"], row["transform_x"])
                 user_data.append(t)
                 last_t = t
                 length = i
@@ -169,6 +181,7 @@ class StatsManager:
                 user_data.append(last_t)
 
             assert len(user_data) == MAX_STEPS, "user data not the right length. Actual length: %d" % (len(user_data))
+
             data.append(user_data)
 
         data = np.array(data)
@@ -186,6 +199,7 @@ class StatsManager:
         sim_data_csv_list = glob.glob(os.path.join(self.datadir, "sim_data/*/*.csv"))
 
         self.sim_dfs = [] 
+        self.baseline_sim_dfs = []
 
         for filename in sim_data_csv_list:
 
@@ -193,7 +207,7 @@ class StatsManager:
                 continue 
 
             exp_id = "_".join(filename.split("/")[-2].split("_")[:3])
-            user_id = int(exp_id.split("_")[0])
+            user_id = int(exp_id.split("_")[0]) - 2
             scenario_num = int(exp_id.split("_")[2])
 
             # exclude user from data
@@ -250,10 +264,17 @@ class StatsManager:
                 df.loc[index,"normalized_rot_x"] = xy_rot_vec[0]
                 df.loc[index,"normalized_rot_y"] = xy_rot_vec[1]
 
-            self.sim_dfs.append(df)
+            if user_id == -1:
+                self.baseline_sim_dfs.append(df)
+            else:
+                self.sim_dfs.append(df)
 
         # Sort based on user id (primary) and scenario number (secondary)
         self.sim_dfs = sorted(self.sim_dfs, key=lambda x: x.iloc[0]["user_id"]+0.1*x.iloc[0]["scenario_num"])
+
+        # assert self.sim_dfs[0].iloc[0]["user_id"] == -1, "baseline doesn't exist"
+
+        # self.baseline_sim_df = self.sim_dfs.pop(0)
 
         self._process_questionnaire_df()
 
@@ -423,14 +444,14 @@ class StatsManager:
         c = list(mcolors.TABLEAU_COLORS)
 
         dfs, _ = self.get_scenario_data(scenario)
-        quantile = self.questionnaire_df.score_risky.quantile(0.75)
-        users = self.questionnaire_df.index[self.questionnaire_df['score_risky'] >= quantile].tolist()
+        # quantile = self.questionnaire_df.score_risky.quantile(0.75)
+        # users = self.questionnaire_df.index[self.questionnaire_df['score_risky'] >= quantile].tolist()
 
         dfs = [df[["frame_number", "transform_z", 
                  "normalized_pos_x", "normalized_pos_y", 
                  "normalized_rot_x", "user_id"]] for df in dfs]
 
-        frames = int(np.max([len(df.index) for df in dfs]))
+        # frames = int(np.max([len(df.index) for df in dfs]))
 
         fig = plt.figure()
         ax = plt.axes()
@@ -475,8 +496,12 @@ class StatsManager:
                         color='blue',
                         size=5
                     )
-                
-        ax.set_xlim([np.min(x) - 10, np.max(x) + 10]) # fix the x axis
+        
+        if scenario == 2:
+            ax.set_xlim([np.min(x) - 30, np.max(x) + 30]) # fix the x axis
+        else:
+            ax.set_xlim([np.min(x) - 10, np.max(x) + 10]) # fix the x axis
+
         ax.set_ylim([np.min(y) - 10, np.max(y) + 10]) # fix the y axis
 
         ax.set_xlabel('X position', 
@@ -488,6 +513,7 @@ class StatsManager:
 
         plt.savefig("figs/trajectory_heatmap_scenario%d.pdf" % (scenario))
         plt.close()
+
 
     def animate_trajectories(self, scenario=0):
         
@@ -546,12 +572,12 @@ class StatsManager:
                 if i < frames - 1 and i > 20:
                     ax.annotate("", xy=(x[i],y[i]), xytext=(x[i-2],y[i-2]), arrowprops=dict(arrowstyle="->", color=line.get_color()))
                     
-                    if j == 0:
-                        ax.annotate("baseline",
-                            xy=(x[i],y[i]), 
-                            xytext=(1,0), textcoords='offset points',
-                            color=line.get_color()
-                        )
+                    # if j == 0:
+                    #     ax.annotate("baseline",
+                    #         xy=(x[i],y[i]), 
+                    #         xytext=(1,0), textcoords='offset points',
+                    #         color=line.get_color()
+                    #     )
 
                 text_box = AnchoredText("Frame: %d" % (i), frameon=True, loc=4, pad=0.5)
                 plt.setp(text_box.patch, facecolor='white', alpha=0.5)

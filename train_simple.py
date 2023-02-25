@@ -28,6 +28,8 @@ class VRDrivingDataset(Dataset):
         self.personality_data = self.stats.get_personality_data()
         self.simdata = self.stats.get_sim_data(scenario)
 
+        # print(len(self.simdata), len(self.personality_data))
+        # print(self.personality_data)
         if shuffle: 
             zipped = list(zip(list(self.personality_data), list(self.simdata)))
             random.shuffle(zipped)
@@ -94,7 +96,7 @@ class Trainer:
         # self.dataloader = DataLoader(self.dataset, batch_size=batch_size)
         self.splits = KFold(n_splits=self.num_splits,shuffle=True,random_state=42)
 
-        print("Size of dataset: ", len(self.dataset))
+        # print("Size of dataset: ", len(self.dataset))
 
         self.lr = lr 
         self.optimizer = Adam(self.net.parameters(), lr=lr)
@@ -233,23 +235,41 @@ class Trainer:
         # # now grads is weighted from 0 to 1, we can use this for visualizations.
         return grads
 
+    def predict(self, user, scenario):
+        
+        X = self.dataset.stats.get_sim_data(scenario, user=user)
 
+        X = X[0].T
+
+        self.net.eval() 
+
+        X = torch.Tensor(X).unsqueeze(0).float().reshape(1, -1)
+        
+        with torch.no_grad():
+            prediction = self.net(X)
+
+        # print(X)
+        print(prediction)
 
 
 
 if __name__ == "__main__":
     
     stats = StatsManager(DATADIR, EXCLUSIONS)
-    # stats.save_to_csv()
+    stats.save_to_csv()
 
-    learning_rates = [0.001, 0.0001, 0.0001, 0.00001]
+    learning_rates = [0.001, 0.001, 0.001, 0.0001]
+    scenarios = [0,1,2,3]
 
-    for scenario in range(4):
-        exp = "simple_grad_%d" % (scenario)
-        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=100, lr=learning_rates[scenario], load=exp) 
-        # trainer.fit()
-        # trainer.save() 
+    for scenario in scenarios:
+        exp = "scenario_%d" % (scenario)
+        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=100, lr=learning_rates[scenario]) 
+        trainer.fit()
+        trainer.save() 
 
+
+        # trainer.predict(user=-1, scenario=scenario)
+        
+        stats.plot_personality_tsne(dimension=2)
         grads = trainer.get_grad_normalized()
-
         stats.trajectory_heatmap(grads, scenario=scenario)
