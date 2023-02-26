@@ -264,6 +264,8 @@ class StatsManager:
                 df.loc[index,"normalized_rot_x"] = xy_rot_vec[0]
                 df.loc[index,"normalized_rot_y"] = xy_rot_vec[1]
 
+            df = df[ df['normalized_pos_y'] < 250 ]
+
             if user_id == -1:
                 self.baseline_sim_dfs.append(df)
             else:
@@ -271,6 +273,8 @@ class StatsManager:
 
         # Sort based on user id (primary) and scenario number (secondary)
         self.sim_dfs = sorted(self.sim_dfs, key=lambda x: x.iloc[0]["user_id"]+0.1*x.iloc[0]["scenario_num"])
+
+        self.baseline_sim_dfs = sorted(self.baseline_sim_dfs, key=lambda x: x.iloc[0]["scenario_num"])
 
         # assert self.sim_dfs[0].iloc[0]["user_id"] == -1, "baseline doesn't exist"
 
@@ -281,6 +285,8 @@ class StatsManager:
 
     def _process_questionnaire_df(self):
         self.questionnaire_df = pd.read_csv(os.path.join(self.datadir, "questionnaire.csv"), index_col=None, header=0)
+        self.questionnaire_df['user_id'] = self.questionnaire_df.index
+        
         self.questionnaire_df.columns = self.questionnaire_df.columns.str.replace(".1", "", regex=True).str.strip()
         self.questionnaire_df.rename({'What is your gender?': 'gender'}, axis=1, inplace=True)
         self.questionnaire_df.rename({'Full Name': 'name'}, axis=1, inplace=True)
@@ -333,6 +339,7 @@ class StatsManager:
                                         "To what extent were there times during the experience when the virtual environment was the reality for you?": 'vr_immersion', 
                                     }, inplace=True)
         
+        
     @staticmethod
     def _convert_transform_str_to_int(x):
         ''' Converts the string transform data type into tuple(array, array) type.
@@ -377,7 +384,7 @@ class StatsManager:
         df.to_csv(os.path.join(savedir,"questionnaire_processed.csv"), encoding='utf-8', index=False)
 
         for df in self.sim_dfs:
-            df.to_csv(os.path.join(savedir,"simdata","%s.csv"%(df["exp_id"][0])), encoding='utf-8', index=False)
+            df.to_csv(os.path.join(savedir,"simdata","%d_scenario_%d.csv"%(df["user_id"][0], df["scenario_num"][0])), encoding='utf-8', index=False)
 
     def plot_personality_tsne(self, color_code="gender", dimension=2):
         '''
@@ -441,7 +448,20 @@ class StatsManager:
         return scenario_data, indices
 
     def trajectory_heatmap(self, alpha_weights, scenario=0):
-        c = list(mcolors.TABLEAU_COLORS)
+        
+        baseline_data = self.baseline_sim_dfs[scenario]
+        baseline_data = np.array([baseline_data["normalized_pos_x"].to_numpy(), baseline_data["normalized_pos_y"].to_numpy()])
+        
+        # print(baseline_data.shape)
+        # print(self.baseline_sim_dfs[scenario].shape)
+
+        def find_nearest_x(y):
+            '''Find x point on baseline data closest to y value'''
+
+            idx = np.abs(baseline_data[1] - y).argmin()
+            return baseline_data[0][idx]
+
+        # c = list(mcolors.TABLEAU_COLORS)
 
         dfs, _ = self.get_scenario_data(scenario)
         # quantile = self.questionnaire_df.score_risky.quantile(0.75)
@@ -468,9 +488,13 @@ class StatsManager:
             # if j not in users:
             #     continue 
 
-            x = xs[j]
-            y = ys[j]
+            x = xs[j].to_numpy()
+            y = ys[j].to_numpy()
 
+            if scenario != 1:
+                for i in range(len(x)): 
+                    x_baseline = find_nearest_x(y[i])
+                    x[i] = x[i] - x_baseline
 
             colors = [(0, 0, 0), (1, 0, 0)] # first color is black, last is red
             cm = LinearSegmentedColormap.from_list(
@@ -617,8 +641,8 @@ if __name__ == "__main__":
     #     'score_careful'
     # ]
 
-    DATADIR = "./data"
-    EXCLUSIONS = [2]
+    # DATADIR = "./data"
+    # EXCLUSIONS = [0]
 
     stats = StatsManager(DATADIR, EXCLUSIONS)
 

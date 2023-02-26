@@ -12,7 +12,7 @@ import numpy as np
 
 import random
 
-from run_stats import * 
+from data_processing import * 
 from config import * 
 
 # SCENARIO_MAX_STEPS = {
@@ -263,13 +263,13 @@ if __name__ == "__main__":
 
     for scenario in scenarios:
         exp = "scenario_%d" % (scenario)
-        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=100, lr=learning_rates[scenario]) 
-        trainer.fit()
-        trainer.save() 
+        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=100, lr=learning_rates[scenario], load=exp) 
+        # trainer.fit()
+        # trainer.save() 
 
 
         # trainer.predict(user=-1, scenario=scenario)
-        
-        stats.plot_personality_tsne(dimension=2)
+
+        # stats.plot_personality_tsne(dimension=2)
         grads = trainer.get_grad_normalized()
         stats.trajectory_heatmap(grads, scenario=scenario)
