@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.optim import SGD, Adam, RMSprop
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
-from torch.nn import Linear, MSELoss, L1Loss, functional as F
+from torch.nn import Linear, MSELoss, L1Loss, Softmax, Dropout, functional as F
 
 from sklearn.model_selection import KFold
 
@@ -50,15 +50,35 @@ class SimpleNet(torch.nn.Module):
 
         self.fc1 = Linear(MAX_STEPS*2, 100)
         self.fc2 = Linear(100, 8)
+        self.softmax = Softmax(dim=1)
+        # self.dropout = Dropout(p=0.1)
 
         # torch.nn.init.kaiming_normal_(self.fc1.weight, nonlinearity='relu')
 
     def forward(self, x):
         x = self.fc1(x)
         x = F.relu(x)
+        # x = self.dropout(x)
         x = self.fc2(x)
+        x = self.softmax(x)
         return x
 
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_validation_loss = np.inf
+
+    def early_stop(self, validation_loss):
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+        elif validation_loss > (self.min_validation_loss + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
 
 class Trainer:
 
@@ -165,12 +185,15 @@ class Trainer:
             self.net = SimpleNet()
             self.optimizer =  Adam(self.net.parameters(), lr=self.lr) 
 
+            early_stopper = EarlyStopper(patience=3, min_delta=10)
+
             for epoch in range(self.n_epochs):
                 train_loss = self.train_epoch(self.net, "cpu", dataloader, self.criterion, self.optimizer)
                 test_loss = self.test_epoch(self.net, "cpu", test_loader, self.criterion)
 
                 train_loss = train_loss / len(dataloader.sampler)
                 test_loss = test_loss / len(test_loader.sampler)
+
 
                 print("Epoch: {}; Train Loss: {}; Test Loss: {}".format(epoch, train_loss, test_loss))
 
@@ -180,6 +203,10 @@ class Trainer:
 
                 history['train_loss'].append(train_loss)
                 history['test_loss'].append(test_loss)
+
+                if early_stopper.early_stop(test_loss):      
+                    print("Early stopping at epoch %d" % (epoch))       
+                    break
 
         
         avg_train_loss = np.mean(history['train_loss'])
@@ -191,7 +218,7 @@ class Trainer:
         os.makedirs("./models/%s" % (self.exp_name), exist_ok=True)
         torch.save(self.net.state_dict(), "./models/%s/%s" % (self.exp_name, "model.pt"))
 
-    def get_grad_normalized(self):
+    def get_grad_normalized(self, percentile):
 
         self.net.eval() 
         
@@ -226,8 +253,9 @@ class Trainer:
             grad = np.array(grad)
             grad -= np.amin(grad)
             grad = grad**2
-            grad /= (np.amax(grad) - np.amin(grad))
-            grad[grad<0.6] = 0.1
+            grad /= (np.amax(grad) - np.amin(grad)) 
+            quantile = np.percentile(grad, percentile)
+            grad[grad<quantile] = 0.
             grads.append(grad)
         
         grads = np.array(grads)
@@ -255,15 +283,19 @@ class Trainer:
 
 if __name__ == "__main__":
     
+    # EXCLUSIONS = [0]
+    EXCLUSIONS = [0, 2, 17]
+
     stats = StatsManager(DATADIR, EXCLUSIONS)
-    stats.save_to_csv()
+    # stats.save_to_csv()
 
     learning_rates = [0.001, 0.001, 0.001, 0.0001]
-    scenarios = [0,1,2,3]
+    # scenarios = [3]
+    scenarios = [0,3]
 
     for scenario in scenarios:
         exp = "scenario_%d" % (scenario)
-        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=100, lr=learning_rates[scenario], load=exp) 
+        trainer = Trainer(exp_name=exp, scenario=scenario, num_splits=8, n_epochs=200, lr=learning_rates[scenario], load=exp) 
         # trainer.fit()
         # trainer.save() 
 
@@ -271,5 +303,7 @@ if __name__ == "__main__":
         # trainer.predict(user=-1, scenario=scenario)
 
         # stats.plot_personality_tsne(dimension=2)
-        grads = trainer.get_grad_normalized()
+        grads = trainer.get_grad_normalized(90)
+
+        print(len(grads[grads>0.5].flatten()) / len(grads.flatten()))
         stats.trajectory_heatmap(grads, scenario=scenario)

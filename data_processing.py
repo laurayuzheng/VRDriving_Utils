@@ -32,7 +32,7 @@ SCENARIO_DESCRIPTIONS = {
     0: "Jaywalking pedestrian", 
     1: "Static obstacles on highway",
     2: "Yellow light on intersection approach",
-    3: "Control"
+    3: "No Risks"
 }
 
 MDSI_COLUMNS = [
@@ -42,7 +42,7 @@ MDSI_COLUMNS = [
     'score_angry',
     'score_high_velocity',
     'score_distress_reduction',
-    'score_patient',
+    'score_patient', 
     'score_careful'
 ]
 
@@ -209,6 +209,9 @@ class StatsManager:
             exp_id = "_".join(filename.split("/")[-2].split("_")[:3])
             user_id = int(exp_id.split("_")[0]) - 2
             scenario_num = int(exp_id.split("_")[2])
+
+            if scenario_num not in [0,1,2,3]:
+                continue 
 
             # exclude user from data
             if user_id in self.exclusions:
@@ -441,13 +444,15 @@ class StatsManager:
         indices = []
 
         for i, data in enumerate(self.sim_dfs): 
-            if data.iloc[0]["scenario_num"] == scenario_num:
+            if data.iloc[0]["scenario_num"] == scenario_num and \
+                data.iloc[0]["user_id"] not in EXCLUSIONS:
+
                 scenario_data.append(data)
                 indices.append(i)
 
         return scenario_data, indices
 
-    def trajectory_heatmap(self, alpha_weights, scenario=0):
+    def trajectory_heatmap(self, alpha_weights, scenario=0.):
         
         baseline_data = self.baseline_sim_dfs[scenario]
         baseline_data = np.array([baseline_data["normalized_pos_x"].to_numpy(), baseline_data["normalized_pos_y"].to_numpy()])
@@ -491,10 +496,10 @@ class StatsManager:
             x = xs[j].to_numpy()
             y = ys[j].to_numpy()
 
-            if scenario != 1:
-                for i in range(len(x)): 
-                    x_baseline = find_nearest_x(y[i])
-                    x[i] = x[i] - x_baseline
+            # if scenario != 1:
+            #     for i in range(len(x)): 
+            #         x_baseline = find_nearest_x(y[i])
+            #         x[i] = x[i] - x_baseline
 
             colors = [(0, 0, 0), (1, 0, 0)] # first color is black, last is red
             cm = LinearSegmentedColormap.from_list(
@@ -502,29 +507,55 @@ class StatsManager:
             # mat = np.indices((10,10))[1]
             alphas = alpha_weights[j][:len(x)]
 
-            ax.scatter(x, y, color=cm(alphas), s=6, alpha=alphas)  # update the data.
+            alphas_black = alphas[alphas<0.5]
+            alphas_red = alphas[alphas>=0.5]
+
+            x_black = x[alphas<0.5]
+            y_black = y[alphas<0.5]
+
+            x_red = x[alphas>=0.5]
+            y_red = y[alphas>=0.5]
+
+            # print(len(x_red) / len(x))
+            # ax.scatter(x, y, color=cm(alphas), s=6, alpha=alphas)  # update the data.
+
+            ax.plot(x, y, color='black', alpha=0.2)  # update the data.
+            ax.scatter(x_red, y_red, color=cm(alphas_red), s=6, alpha=alphas_red)  # update the data.
             
             if scenario == 0:
-                ax.axhline(y=42, color='blue', linestyle='dotted')
+                ax.axhline(y=42, color='black', linestyle='solid')
                 ax.annotate("pedestrian",
-                        xy=(-10,42), 
+                        xy=(-6,43), 
                         xytext=(0,2), textcoords='offset points',
-                        color='blue',
-                        size=5
+                        color='black',
+                        size=8
                     )
             if scenario == 2:
-                ax.axhline(y=55, color='blue', linestyle='dotted')
+                ax.axhline(y=55, color='black', linestyle='solid')
                 ax.annotate("yellow traffic light",
-                        xy=(-10,55), 
+                        xy=(-20,55), 
                         xytext=(0,2), textcoords='offset points',
-                        color='blue',
-                        size=5
+                        color='black',
+                        size=8
                     )
         
+        text_pos = -8 if scenario == 3 else -4
+        ax.scatter(0, 0, color='black', alpha=1, s=32)  # update the data.
+        ax.annotate("Vehicle\nStart Position",
+                        xy=(0,0), 
+                        xytext=(text_pos, 0),
+                        color='black',
+                        size=14, 
+                        arrowprops=dict()
+        )
+
+        # ax.annotate('local max', xy=(2, 1), xytext=(3, 1.5),
+        #     arrowprops=dict(facecolor='black', shrink=0.05))
+
         if scenario == 2:
             ax.set_xlim([np.min(x) - 30, np.max(x) + 30]) # fix the x axis
         else:
-            ax.set_xlim([np.min(x) - 10, np.max(x) + 10]) # fix the x axis
+            ax.set_xlim([np.min(x) - 5, np.max(x) + 5]) # fix the x axis
 
         ax.set_ylim([np.min(y) - 10, np.max(y) + 10]) # fix the y axis
 
@@ -533,7 +564,7 @@ class StatsManager:
         ax.set_ylabel('Y position', 
             fontweight ='bold')
 
-        ax.set_title("Scenario %d: %s" % (scenario, SCENARIO_DESCRIPTIONS[scenario]))
+        ax.set_title("Trajectory Importance in Scenario %d: %s" % (scenario+1, SCENARIO_DESCRIPTIONS[scenario]))
 
         plt.savefig("figs/trajectory_heatmap_scenario%d.pdf" % (scenario))
         plt.close()
@@ -574,12 +605,12 @@ class StatsManager:
 
                 color = c[j%len(c)] if j != 0 else 'black'
 
-                line, = ax.plot(x[:i], y[:i], color=color, s=11)  # update the data.
+                line, = ax.plot(x[:i], y[:i], color=color, label=user_ids[j])  # update the data.
                 
                 if scenario == 0:
                     ax.axhline(y=42, color='r', linestyle='dotted')
                     ax.annotate("pedestrian",
-                            xy=(-10,42), 
+                            xy=(-5,42), 
                             xytext=(0,2), textcoords='offset points',
                             color='r',
                             size=5
@@ -587,7 +618,7 @@ class StatsManager:
                 if scenario == 2:
                     ax.axhline(y=55, color='r', linestyle='dotted')
                     ax.annotate("yellow traffic light",
-                            xy=(-10,55), 
+                            xy=(-20,55), 
                             xytext=(0,2), textcoords='offset points',
                             color='r',
                             size=5
@@ -616,7 +647,8 @@ class StatsManager:
                fontweight ='bold')
             
             ax.set_title("Scenario %d: %s" % (scenario, SCENARIO_DESCRIPTIONS[scenario]))
-            
+            # ax.legend()
+
             # ax.set_zlim3d(-10, 10) # fix the y axis
             return line,
 
@@ -646,16 +678,16 @@ if __name__ == "__main__":
 
     stats = StatsManager(DATADIR, EXCLUSIONS)
 
-    stats.save_to_csv()
+    # stats.save_to_csv()
     # stats.print_sim_columns()
     # stats.print_questionnaire_columns()
 
     # stats.plot_personality_tsne(dimension=2)
     # stats.plot_personality_style()
-    # stats.animate_trajectories(scenario=0)
-    # stats.animate_trajectories(scenario=1)
-    # stats.animate_trajectories(scenario=2)
-    # stats.animate_trajectories(scenario=3)
+    stats.animate_trajectories(scenario=0)
+    stats.animate_trajectories(scenario=1)
+    stats.animate_trajectories(scenario=2)
+    stats.animate_trajectories(scenario=3)
 
     # for df in stats.sim_dfs:
     #     print(df.columns)
